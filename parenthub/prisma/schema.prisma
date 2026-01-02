@@ -1,0 +1,361 @@
+/**
+ * PRISMA SCHEMA - prisma/schema.prisma
+ *
+ * Purpose: Database schema definition for ParentHub
+ *
+ * Models:
+ * - User: Parents, providers, admins
+ * - Provider: Service provider listings
+ * - Category: Service categories (hierarchical)
+ * - Review: User reviews for providers
+ * - Favorite: User saved providers
+ * - AnalyticsEvent: Tracked events
+ * - ClickLedger: Monetization tracking
+ *
+ * Features:
+ * - Soft deletes (deletedAt)
+ * - Audit timestamps (createdAt, updatedAt)
+ * - Full-text search indexes
+ * - Geo indexes for location queries
+ */
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearch", "fullTextIndex"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============ ENUMS ============
+
+enum UserRole {
+  USER
+  PROVIDER
+  ADMIN
+}
+
+enum ProviderStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PriceBand {
+  BUDGET    // ₪
+  MIDRANGE  // ₪₪
+  PREMIUM   // ₪₪₪
+}
+
+// ============ USER ============
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  phone         String?   @unique
+  phoneVerified DateTime?
+  image         String?
+  role          UserRole  @default(USER)
+
+  // Relations
+  provider      Provider?
+  reviews       Review[]
+  favorites     Favorite[]
+  accounts      Account[]
+  sessions      Session[]
+
+  // Timestamps
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastActiveAt  DateTime?
+  deletedAt     DateTime?
+
+  @@index([email])
+  @@index([phone])
+  @@index([role])
+}
+
+// ============ AUTH (NextAuth) ============
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ============ PROVIDER ============
+
+model Provider {
+  id              String         @id @default(cuid())
+  userId          String         @unique
+  user            User           @relation(fields: [userId], references: [id])
+
+  // Basic info
+  name            String
+  slug            String         @unique
+  description     String         @db.Text
+  bio             String?        @db.Text
+
+  // Media
+  photos          String[]
+
+  // Services
+  services        String[]
+  priceBand       PriceBand      @default(MIDRANGE)
+  languages       String[]
+
+  // Schedule (JSON)
+  schedule        Json?          // WeeklySchedule type
+  isAvailable     Boolean        @default(true)
+
+  // Contact
+  phone           String
+  whatsapp        String?
+  email           String?
+  website         String?
+
+  // Location
+  address         String
+  city            String
+  lat             Float
+  lng             Float
+  serviceRadius   Int?           // km
+
+  // Status & Verification
+  status          ProviderStatus @default(PENDING)
+  isVerified      Boolean        @default(false)
+  verifiedAt      DateTime?
+
+  // Monetization
+  featuredRank    Int            @default(0)
+  sponsorBadge    Boolean        @default(false)
+
+  // Admin
+  adminNotes      String?        @db.Text
+  approvedBy      String?
+  approvedAt      DateTime?
+
+  // Relations
+  categories      Category[]     @relation("ProviderCategories")
+  reviews         Review[]
+  favorites       Favorite[]
+  clickLedger     ClickLedger[]
+  analyticsEvents AnalyticsEvent[]
+
+  // Timestamps
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  deletedAt       DateTime?
+
+  @@index([status])
+  @@index([city])
+  @@index([isAvailable])
+  @@index([featuredRank])
+  @@index([lat, lng])
+}
+
+// ============ CATEGORY ============
+
+model Category {
+  id          String     @id @default(cuid())
+  name        String
+  nameHe      String
+  slug        String     @unique
+  icon        String?
+  description String?
+
+  // Hierarchy
+  parentId    String?
+  parent      Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children    Category[] @relation("CategoryHierarchy")
+
+  // Display
+  sortOrder   Int        @default(0)
+  isActive    Boolean    @default(true)
+
+  // Relations
+  providers   Provider[] @relation("ProviderCategories")
+
+  // Timestamps
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([slug])
+  @@index([isActive])
+  @@index([sortOrder])
+}
+
+// ============ REVIEW ============
+
+model Review {
+  id               String       @id @default(cuid())
+
+  // Content
+  rating           Int          // 1-5
+  text             String       @db.Text
+  photos           String[]
+
+  // Relations
+  userId           String
+  user             User         @relation(fields: [userId], references: [id])
+  providerId       String
+  provider         Provider     @relation(fields: [providerId], references: [id])
+
+  // Verification
+  isVerifiedInteraction Boolean @default(false)
+
+  // Moderation
+  status           ReviewStatus @default(PENDING)
+  moderatedBy      String?
+  moderatedAt      DateTime?
+  moderationReason String?
+
+  // Timestamps
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@unique([userId, providerId])
+  @@index([providerId])
+  @@index([status])
+  @@index([rating])
+}
+
+// ============ FAVORITE ============
+
+model Favorite {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  providerId String
+  provider   Provider @relation(fields: [providerId], references: [id])
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, providerId])
+  @@index([userId])
+}
+
+// ============ ANALYTICS ============
+
+model AnalyticsEvent {
+  id         String   @id @default(cuid())
+
+  // Event info
+  event      String
+  properties Json
+  sessionId  String
+
+  // Context
+  userId     String?
+  providerId String?
+  provider   Provider? @relation(fields: [providerId], references: [id])
+
+  // Device/Platform
+  platform   String?  // ios, android, web
+  userAgent  String?
+
+  // Location
+  lat        Float?
+  lng        Float?
+  city       String?
+
+  // Timestamp
+  timestamp  DateTime @default(now())
+
+  @@index([event])
+  @@index([providerId])
+  @@index([sessionId])
+  @@index([timestamp])
+}
+
+// ============ MONETIZATION ============
+
+model ClickLedger {
+  id          String   @id @default(cuid())
+
+  providerId  String
+  provider    Provider @relation(fields: [providerId], references: [id])
+
+  eventType   String   // call, whatsapp, navigate, website
+  isBillable  Boolean  @default(true)
+  amount      Float?   // calculated CPC amount
+
+  // Context
+  sessionId   String?
+  userId      String?
+
+  timestamp   DateTime @default(now())
+
+  @@index([providerId])
+  @@index([eventType])
+  @@index([timestamp])
+  @@index([isBillable])
+}
+
+// ============ OTP (for phone auth) ============
+
+model OTP {
+  id         String   @id @default(cuid())
+  phone      String
+  code       String
+  attempts   Int      @default(0)
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  usedAt     DateTime?
+
+  @@index([phone])
+  @@index([expiresAt])
+}
+
+// ============ IMPORT LOG ============
+
+model ImportLog {
+  id           String   @id @default(cuid())
+  filename     String
+  rowCount     Int
+  importedCount Int
+  errorCount   Int
+  errors       Json?
+  status       String   // pending, processing, completed, failed
+  createdBy    String
+  createdAt    DateTime @default(now())
+  completedAt  DateTime?
+}
