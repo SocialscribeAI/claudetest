@@ -1,27 +1,24 @@
 /**
- * SIGNUP API - app/api/auth/signup/route.ts
+ * LOGIN API - app/api/auth/login/route.ts
  *
- * Purpose: Handle new user registration by sending OTP
+ * Purpose: Send OTP to existing user for login
  *
- * POST /api/auth/signup
+ * POST /api/auth/login
  *
  * Request body:
  * {
- *   phone: string,      // Phone number with country code
- *   email?: string,     // Optional email
- *   name?: string,      // Optional name
- *   role: "user" | "provider"  // Account type
+ *   phone: string   // Phone number with country code
  * }
  *
  * Response:
  * - 200: { success: true, message: "OTP sent" }
  * - 400: { error: "Validation error" }
- * - 409: { error: "User already exists" }
+ * - 404: { error: "User not found" }
  * - 429: { error: "Too many requests" }
  *
  * Flow:
  * 1. Validate input
- * 2. Check if user already exists
+ * 2. Check if user exists
  * 3. Generate 6-digit OTP
  * 4. Store OTP in DB with 5-minute expiry
  * 5. Send OTP via SMS (stubbed for now)
@@ -37,15 +34,12 @@ import { prisma } from "@/lib/db";
 import { z } from "zod";
 
 // Validation schema
-const signupSchema = z.object({
+const loginSchema = z.object({
   phone: z
     .string()
     .min(9)
     .max(15)
     .regex(/^\+?[0-9]+$/, "Invalid phone number format"),
-  email: z.string().email().optional().nullable(),
-  name: z.string().min(2).max(100).optional().nullable(),
-  role: z.enum(["user", "provider"]).default("user"),
 });
 
 // Rate limiting: track requests per phone
@@ -56,7 +50,6 @@ function checkRateLimit(phone: string): boolean {
   const entry = rateLimitMap.get(phone);
 
   if (!entry || entry.resetAt < now) {
-    // Reset or create new entry
     rateLimitMap.set(phone, { count: 1, resetAt: now + 60 * 60 * 1000 }); // 1 hour
     return true;
   }
@@ -76,16 +69,12 @@ function generateOTP(): string {
 
 // Normalize phone number
 function normalizePhone(phone: string): string {
-  // Remove spaces, dashes, and ensure + prefix for international
   let normalized = phone.replace(/[\s\-\(\)]/g, "");
-
-  // Add Israel country code if not present
   if (normalized.startsWith("0")) {
     normalized = "+972" + normalized.slice(1);
   } else if (!normalized.startsWith("+")) {
     normalized = "+" + normalized;
   }
-
   return normalized;
 }
 
@@ -94,7 +83,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
 
     // Validate input
-    const validation = signupSchema.safeParse(body);
+    const validation = loginSchema.safeParse(body);
     if (!validation.success) {
       return NextResponse.json(
         { error: "Validation error", details: validation.error.flatten() },
@@ -102,7 +91,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { phone: rawPhone, email, name, role } = validation.data;
+    const { phone: rawPhone } = validation.data;
     const phone = normalizePhone(rawPhone);
 
     // Check rate limit
@@ -113,30 +102,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if user already exists with this phone (and is verified)
-    const existingUser = await prisma.user.findUnique({
+    // Check if user exists
+    const user = await prisma.user.findUnique({
       where: { phone },
     });
 
-    if (existingUser && existingUser.phoneVerified) {
+    if (!user) {
       return NextResponse.json(
-        { error: "User with this phone already exists. Please login instead." },
-        { status: 409 }
+        { error: "User not found. Please sign up first." },
+        { status: 404 }
       );
-    }
-
-    // Check email uniqueness if provided
-    if (email) {
-      const existingEmail = await prisma.user.findUnique({
-        where: { email },
-      });
-
-      if (existingEmail) {
-        return NextResponse.json(
-          { error: "Email already in use" },
-          { status: 409 }
-        );
-      }
     }
 
     // Delete any existing unused OTPs for this phone
@@ -160,11 +135,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Store signup data temporarily in OTP record for later use
-    // (In production, you might use Redis or a separate pending signups table)
-
     // TODO: Send SMS with OTP
-    // For now, log it (in production, integrate with SMS provider like Twilio)
     console.log(`[DEV] OTP for ${phone}: ${code}`);
 
     // In development, also return the code (REMOVE IN PRODUCTION!)
@@ -174,16 +145,11 @@ export async function POST(request: NextRequest) {
       success: true,
       message: "OTP sent successfully",
       phone,
-      // Store pending signup data in response for client to send back during verification
-      pendingSignup: {
-        email: email || null,
-        name: name || null,
-        role,
-      },
+      userName: user.name, // Show name for confirmation
       ...(isDev && { devCode: code }), // Only in development
     });
   } catch (error) {
-    console.error("Signup error:", error);
+    console.error("Login error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
