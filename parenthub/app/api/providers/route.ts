@@ -24,29 +24,184 @@
  *   page: number,
  *   totalPages: number
  * }
- *
- * Provider object includes:
- * - id, name, slug
- * - category (name, icon)
- * - photos (first image)
- * - rating (average, count)
- * - priceBand
- * - distance (calculated from user location)
- * - isAvailable
- * - isFeatured
- *
- * Sorting:
- * - distance: Nearest first (requires lat/lng)
- * - rating: Highest rated first
- * - featured: Featured first, then by rating
- *
- * Caching:
- * - Cache for 5 minutes with location-based key
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/db";
+import { calculateDistance } from "@/lib/maps/google-maps";
+
+export const revalidate = 300; // Cache for 5 minutes
 
 export async function GET(request: NextRequest) {
-  // TODO: Implement providers list
-  return NextResponse.json({ providers: [], total: 0 });
+  try {
+    const { searchParams } = new URL(request.url);
+
+    // Parse query parameters
+    const lat = searchParams.get("lat") ? parseFloat(searchParams.get("lat")!) : null;
+    const lng = searchParams.get("lng") ? parseFloat(searchParams.get("lng")!) : null;
+    const radius = parseFloat(searchParams.get("radius") || "10");
+    const category = searchParams.get("category");
+    const query = searchParams.get("q");
+    const sort = searchParams.get("sort") || "featured";
+    const price = searchParams.get("price");
+    const available = searchParams.get("available") === "true";
+    const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
+    const limit = Math.min(50, Math.max(1, parseInt(searchParams.get("limit") || "20")));
+
+    // Build where clause
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const where: any = {
+      status: "ACTIVE",
+      deletedAt: null,
+    };
+
+    // Category filter
+    if (category) {
+      where.categories = {
+        some: { slug: category },
+      };
+    }
+
+    // Search query
+    if (query) {
+      where.OR = [
+        { name: { contains: query, mode: "insensitive" } },
+        { description: { contains: query, mode: "insensitive" } },
+        { services: { has: query } },
+      ];
+    }
+
+    // Price band filter
+    if (price) {
+      const priceBands = price.split(",");
+      const priceMap: Record<string, string> = {
+        "1": "BUDGET",
+        "2": "MIDRANGE",
+        "3": "PREMIUM",
+      };
+      where.priceBand = {
+        in: priceBands.map((p) => priceMap[p]).filter(Boolean),
+      };
+    }
+
+    // Availability filter
+    if (available) {
+      where.isAvailable = true;
+    }
+
+    // Build order by
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let orderBy: any[] = [];
+
+    switch (sort) {
+      case "featured":
+        orderBy = [{ featuredRank: "desc" }, { createdAt: "desc" }];
+        break;
+      case "rating":
+        orderBy = [{ createdAt: "desc" }];
+        break;
+      case "distance":
+        orderBy = [{ createdAt: "desc" }];
+        break;
+      default:
+        orderBy = [{ featuredRank: "desc" }, { createdAt: "desc" }];
+    }
+
+    // Fetch providers
+    const [providers, total] = await Promise.all([
+      prisma.provider.findMany({
+        where,
+        orderBy,
+        skip: (page - 1) * limit,
+        take: limit * 2, // Fetch extra for geo filtering
+        include: {
+          categories: {
+            select: {
+              id: true,
+              name: true,
+              nameHe: true,
+              slug: true,
+              icon: true,
+            },
+          },
+          reviews: {
+            where: { status: "APPROVED" },
+            select: { rating: true },
+          },
+        },
+      }),
+      prisma.provider.count({ where }),
+    ]);
+
+    // Transform and add computed fields
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let results = providers.map((provider: any) => {
+      // Calculate average rating
+      const ratings = provider.reviews.map((r: { rating: number }) => r.rating);
+      const avgRating = ratings.length > 0
+        ? ratings.reduce((a: number, b: number) => a + b, 0) / ratings.length
+        : null;
+
+      // Calculate distance if user location provided
+      let distance: number | null = null;
+      if (lat && lng) {
+        distance = calculateDistance(lat, lng, provider.lat, provider.lng);
+      }
+
+      return {
+        id: provider.id,
+        name: provider.name,
+        slug: provider.slug,
+        photo: provider.photos[0] || null,
+        photos: provider.photos,
+        description: provider.description.substring(0, 200),
+        categories: provider.categories,
+        rating: avgRating ? Math.round(avgRating * 10) / 10 : null,
+        reviewCount: provider.reviews.length,
+        priceBand: provider.priceBand === "BUDGET" ? 1 : provider.priceBand === "MIDRANGE" ? 2 : 3,
+        city: provider.city,
+        address: provider.address,
+        lat: provider.lat,
+        lng: provider.lng,
+        distance,
+        isAvailable: provider.isAvailable,
+        isFeatured: provider.featuredRank > 0,
+        isVerified: provider.isVerified,
+        phone: provider.phone,
+        whatsapp: provider.whatsapp,
+      };
+    });
+
+    // Filter by radius if location provided
+    if (lat && lng && radius) {
+      results = results.filter((p) => p.distance !== null && p.distance <= radius);
+    }
+
+    // Sort by distance if requested
+    if (sort === "distance" && lat && lng) {
+      results.sort((a, b) => (a.distance || 999) - (b.distance || 999));
+    }
+
+    // Sort by rating if requested
+    if (sort === "rating") {
+      results.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+    }
+
+    // Apply pagination after geo filtering
+    const paginatedResults = results.slice(0, limit);
+    const totalPages = Math.ceil(total / limit);
+
+    return NextResponse.json({
+      providers: paginatedResults,
+      total,
+      page,
+      totalPages,
+    });
+  } catch (error) {
+    console.error("Error fetching providers:", error);
+    return NextResponse.json(
+      { error: "Failed to fetch providers" },
+      { status: 500 }
+    );
+  }
 }

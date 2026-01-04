@@ -6,74 +6,220 @@
  * GET /api/reviews/[providerId]
  * - Get paginated reviews for a provider (public)
  *
- * Query parameters:
- * - page: number (default: 1)
- * - limit: number (default: 10)
- * - sort: "recent" | "highest" | "lowest" (default: "recent")
- *
- * Response:
- * {
- *   reviews: [
- *     {
- *       id, rating (1-5), text,
- *       photos?: string[],
- *       user: { name, initial },
- *       createdAt,
- *       isVerified: boolean (verified interaction)
- *     }
- *   ],
- *   summary: {
- *     average: number,
- *     count: number,
- *     distribution: { 1: n, 2: n, 3: n, 4: n, 5: n }
- *   },
- *   page, totalPages
- * }
- *
- * ---
- *
  * POST /api/reviews/[providerId]
  * - Submit a new review (auth required)
- *
- * Request body:
- * {
- *   rating: number (1-5),
- *   text: string (10-500 chars),
- *   photos?: string[] (max 3)
- * }
- *
- * Response:
- * - 201: { success: true, review: Review }
- * - 400: { error: "Validation error" }
- * - 401: { error: "Login required" }
- * - 403: { error: "Already reviewed" }
- *
- * Flow:
- * 1. Verify user is authenticated
- * 2. Check user hasn't already reviewed this provider
- * 3. Validate input
- * 4. Create review with status "pending"
- * 5. Return review
- *
- * Moderation:
- * - Reviews go to pending queue
- * - Admin must approve before public display
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/db";
+import { auth } from "@/lib/auth/config";
+import { z } from "zod";
 
 interface RouteParams {
   params: Promise<{ providerId: string }>;
 }
 
+// GET - Fetch reviews for a provider
 export async function GET(request: NextRequest, { params }: RouteParams) {
-  const { providerId } = await params;
-  // TODO: Implement get reviews
-  return NextResponse.json({ reviews: [], summary: null, providerId });
+  try {
+    const { providerId } = await params;
+    const { searchParams } = new URL(request.url);
+
+    const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
+    const limit = Math.min(50, Math.max(1, parseInt(searchParams.get("limit") || "10")));
+    const sort = searchParams.get("sort") || "recent";
+
+    // Verify provider exists
+    const provider = await prisma.provider.findUnique({
+      where: { id: providerId },
+      select: { id: true },
+    });
+
+    if (!provider) {
+      return NextResponse.json(
+        { error: "Provider not found" },
+        { status: 404 }
+      );
+    }
+
+    // Build order by
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let orderBy: any = { createdAt: "desc" };
+    if (sort === "highest") orderBy = { rating: "desc" };
+    if (sort === "lowest") orderBy = { rating: "asc" };
+
+    // Fetch reviews
+    const [reviews, totalCount, allRatings] = await Promise.all([
+      prisma.review.findMany({
+        where: {
+          providerId,
+          status: "APPROVED",
+        },
+        orderBy,
+        skip: (page - 1) * limit,
+        take: limit,
+        include: {
+          user: {
+            select: { name: true },
+          },
+        },
+      }),
+      prisma.review.count({
+        where: { providerId, status: "APPROVED" },
+      }),
+      prisma.review.findMany({
+        where: { providerId, status: "APPROVED" },
+        select: { rating: true },
+      }),
+    ]);
+
+    // Calculate summary
+    const distribution: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    let totalRating = 0;
+    allRatings.forEach((r) => {
+      distribution[r.rating]++;
+      totalRating += r.rating;
+    });
+
+    const summary = {
+      average: allRatings.length > 0
+        ? Math.round((totalRating / allRatings.length) * 10) / 10
+        : null,
+      count: allRatings.length,
+      distribution,
+    };
+
+    // Transform reviews
+    const transformedReviews = reviews.map((review) => ({
+      id: review.id,
+      rating: review.rating,
+      text: review.text,
+      photos: review.photos,
+      user: {
+        name: review.user.name || "Anonymous",
+        initial: (review.user.name || "A").charAt(0).toUpperCase(),
+      },
+      createdAt: review.createdAt,
+      isVerified: review.isVerifiedInteraction,
+    }));
+
+    return NextResponse.json({
+      reviews: transformedReviews,
+      summary,
+      page,
+      totalPages: Math.ceil(totalCount / limit),
+    });
+  } catch (error) {
+    console.error("Error fetching reviews:", error);
+    return NextResponse.json(
+      { error: "Failed to fetch reviews" },
+      { status: 500 }
+    );
+  }
 }
 
+// Validation schema for review submission
+const reviewSchema = z.object({
+  rating: z.number().min(1).max(5),
+  text: z.string().min(10).max(500),
+  photos: z.array(z.string().url()).max(3).optional(),
+});
+
+// POST - Submit a new review
 export async function POST(request: NextRequest, { params }: RouteParams) {
-  const { providerId } = await params;
-  // TODO: Implement submit review
-  return NextResponse.json({ message: "Not implemented", providerId }, { status: 501 });
+  try {
+    const { providerId } = await params;
+
+    // Check authentication
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json(
+        { error: "Login required" },
+        { status: 401 }
+      );
+    }
+
+    const userId = session.user.id;
+
+    // Verify provider exists
+    const provider = await prisma.provider.findUnique({
+      where: { id: providerId },
+      select: { id: true, status: true },
+    });
+
+    if (!provider || provider.status !== "ACTIVE") {
+      return NextResponse.json(
+        { error: "Provider not found" },
+        { status: 404 }
+      );
+    }
+
+    // Check if user already reviewed
+    const existingReview = await prisma.review.findUnique({
+      where: {
+        userId_providerId: {
+          userId,
+          providerId,
+        },
+      },
+    });
+
+    if (existingReview) {
+      return NextResponse.json(
+        { error: "You have already reviewed this provider" },
+        { status: 403 }
+      );
+    }
+
+    // Parse and validate body
+    const body = await request.json();
+    const parsed = reviewSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid input", details: parsed.error.errors },
+        { status: 400 }
+      );
+    }
+
+    const { rating, text, photos } = parsed.data;
+
+    // Create review (pending moderation)
+    const review = await prisma.review.create({
+      data: {
+        userId,
+        providerId,
+        rating,
+        text,
+        photos: photos || [],
+        status: "PENDING",
+        isVerifiedInteraction: false, // Could be set to true if we track interactions
+      },
+      include: {
+        user: {
+          select: { name: true },
+        },
+      },
+    });
+
+    return NextResponse.json(
+      {
+        success: true,
+        review: {
+          id: review.id,
+          rating: review.rating,
+          text: review.text,
+          status: "pending",
+          message: "Your review is pending moderation",
+        },
+      },
+      { status: 201 }
+    );
+  } catch (error) {
+    console.error("Error submitting review:", error);
+    return NextResponse.json(
+      { error: "Failed to submit review" },
+      { status: 500 }
+    );
+  }
 }
