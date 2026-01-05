@@ -4,14 +4,12 @@
  * Purpose: Components for search and discovery features
  *
  * Components:
- * - SearchBar: Search input with autocomplete
- * - FilterSheet: Filter bottom sheet
- * - ProviderList: Scrollable provider list
- * - GoogleMap: Interactive map view
- * - ListMapToggle: View mode toggle
+ * - SearchBar: Search input with autocomplete and recent searches
+ * - FilterSheet: Filter bottom sheet with multiple filter options
+ * - ProviderList: Scrollable provider list with infinite scroll
+ * - GoogleMap: Interactive map view with markers
+ * - ListMapToggle: View mode toggle (list/map)
  * - SortDropdown: Sort options dropdown
- * - CategoryGrid: Category tiles grid
- * - SearchSuggestions: Autocomplete dropdown
  */
 
 export * from "./search-bar";
