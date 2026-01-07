@@ -2,6 +2,7 @@
  * PRISMA SCHEMA - prisma/schema.prisma
  *
  * Purpose: Database schema definition for ParentHub
+ * Database: SQLite (free, local, no setup required)
  *
  * Models:
  * - User: Parents, providers, admins
@@ -11,48 +12,15 @@
  * - Favorite: User saved providers
  * - AnalyticsEvent: Tracked events
  * - ClickLedger: Monetization tracking
- *
- * Features:
- * - Soft deletes (deletedAt)
- * - Audit timestamps (createdAt, updatedAt)
- * - Full-text search indexes
- * - Geo indexes for location queries
  */
 
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["fullTextSearch", "fullTextIndex"]
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
-}
-
-// ============ ENUMS ============
-
-enum UserRole {
-  USER
-  PROVIDER
-  ADMIN
-}
-
-enum ProviderStatus {
-  PENDING
-  ACTIVE
-  SUSPENDED
-}
-
-enum ReviewStatus {
-  PENDING
-  APPROVED
-  REJECTED
-}
-
-enum PriceBand {
-  BUDGET    // ₪
-  MIDRANGE  // ₪₪
-  PREMIUM   // ₪₪₪
 }
 
 // ============ USER ============
@@ -65,7 +33,7 @@ model User {
   phone         String?   @unique
   phoneVerified DateTime?
   image         String?
-  role          UserRole  @default(USER)
+  role          String    @default("USER") // USER, PROVIDER, ADMIN
 
   // Relations
   provider      Provider?
@@ -93,12 +61,12 @@ model Account {
   type              String
   provider          String
   providerAccountId String
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
+  refresh_token     String?
+  access_token      String?
   expires_at        Int?
   token_type        String?
   scope             String?
-  id_token          String? @db.Text
+  id_token          String?
   session_state     String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -125,27 +93,27 @@ model VerificationToken {
 // ============ PROVIDER ============
 
 model Provider {
-  id              String         @id @default(cuid())
-  userId          String         @unique
-  user            User           @relation(fields: [userId], references: [id])
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  user            User      @relation(fields: [userId], references: [id])
 
   // Basic info
   name            String
-  slug            String         @unique
-  description     String         @db.Text
-  bio             String?        @db.Text
+  slug            String    @unique
+  description     String
+  bio             String?
 
-  // Media
-  photos          String[]
+  // Media (JSON array as string for SQLite)
+  photos          String    @default("[]")
 
-  // Services
-  services        String[]
-  priceBand       PriceBand      @default(MIDRANGE)
-  languages       String[]
+  // Services (JSON array as string for SQLite)
+  services        String    @default("[]")
+  priceBand       String    @default("MIDRANGE") // BUDGET, MIDRANGE, PREMIUM
+  languages       String    @default("[]")
 
   // Schedule (JSON)
-  schedule        Json?          // WeeklySchedule type
-  isAvailable     Boolean        @default(true)
+  schedule        String?
+  isAvailable     Boolean   @default(true)
 
   // Contact
   phone           String
@@ -156,102 +124,112 @@ model Provider {
   // Location
   address         String
   city            String
+  neighborhoods   String    @default("[]")
   lat             Float
   lng             Float
-  serviceRadius   Int?           // km
+  serviceRadius   Int?
 
   // Status & Verification
-  status          ProviderStatus @default(PENDING)
-  isVerified      Boolean        @default(false)
+  status          String    @default("PENDING") // PENDING, ACTIVE, SUSPENDED
+  isVerified      Boolean   @default(false)
   verifiedAt      DateTime?
 
   // Monetization
-  featuredRank    Int            @default(0)
-  sponsorBadge    Boolean        @default(false)
+  featuredRank    Int       @default(0)
+  sponsorBadge    Boolean   @default(false)
 
   // Admin
-  adminNotes      String?        @db.Text
+  adminNotes      String?
   approvedBy      String?
   approvedAt      DateTime?
 
   // Relations
-  categories      Category[]     @relation("ProviderCategories")
+  categories      CategoryProvider[]
   reviews         Review[]
   favorites       Favorite[]
   clickLedger     ClickLedger[]
   analyticsEvents AnalyticsEvent[]
 
   // Timestamps
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
   deletedAt       DateTime?
 
   @@index([status])
   @@index([city])
   @@index([isAvailable])
   @@index([featuredRank])
-  @@index([lat, lng])
 }
 
 // ============ CATEGORY ============
 
 model Category {
-  id          String     @id @default(cuid())
+  id          String             @id @default(cuid())
   name        String
   nameHe      String
-  slug        String     @unique
+  slug        String             @unique
   icon        String?
   description String?
 
   // Hierarchy
   parentId    String?
-  parent      Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
-  children    Category[] @relation("CategoryHierarchy")
+  parent      Category?          @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children    Category[]         @relation("CategoryHierarchy")
 
   // Display
-  sortOrder   Int        @default(0)
-  isActive    Boolean    @default(true)
+  sortOrder   Int                @default(0)
+  isActive    Boolean            @default(true)
 
   // Relations
-  providers   Provider[] @relation("ProviderCategories")
+  providers   CategoryProvider[]
 
   // Timestamps
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
 
   @@index([slug])
   @@index([isActive])
   @@index([sortOrder])
 }
 
+// Junction table for Provider-Category many-to-many
+model CategoryProvider {
+  providerId String
+  categoryId String
+  provider   Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([providerId, categoryId])
+}
+
 // ============ REVIEW ============
 
 model Review {
-  id               String       @id @default(cuid())
+  id               String   @id @default(cuid())
 
   // Content
-  rating           Int          // 1-5
-  text             String       @db.Text
-  photos           String[]
+  rating           Int      // 1-5
+  text             String
+  photos           String   @default("[]")
 
   // Relations
   userId           String
-  user             User         @relation(fields: [userId], references: [id])
+  user             User     @relation(fields: [userId], references: [id])
   providerId       String
-  provider         Provider     @relation(fields: [providerId], references: [id])
+  provider         Provider @relation(fields: [providerId], references: [id])
 
   // Verification
   isVerifiedInteraction Boolean @default(false)
 
   // Moderation
-  status           ReviewStatus @default(PENDING)
+  status           String   @default("PENDING") // PENDING, APPROVED, REJECTED
   moderatedBy      String?
   moderatedAt      DateTime?
   moderationReason String?
 
   // Timestamps
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   @@unique([userId, providerId])
   @@index([providerId])
@@ -276,11 +254,11 @@ model Favorite {
 // ============ ANALYTICS ============
 
 model AnalyticsEvent {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
 
   // Event info
   event      String
-  properties Json
+  properties String    @default("{}")
   sessionId  String
 
   // Context
@@ -289,7 +267,7 @@ model AnalyticsEvent {
   provider   Provider? @relation(fields: [providerId], references: [id])
 
   // Device/Platform
-  platform   String?  // ios, android, web
+  platform   String?
   userAgent  String?
 
   // Location
@@ -298,7 +276,7 @@ model AnalyticsEvent {
   city       String?
 
   // Timestamp
-  timestamp  DateTime @default(now())
+  timestamp  DateTime  @default(now())
 
   @@index([event])
   @@index([providerId])
@@ -316,9 +294,8 @@ model ClickLedger {
 
   eventType   String   // call, whatsapp, navigate, website
   isBillable  Boolean  @default(true)
-  amount      Float?   // calculated CPC amount
+  amount      Float?
 
-  // Context
   sessionId   String?
   userId      String?
 
@@ -333,12 +310,12 @@ model ClickLedger {
 // ============ OTP (for phone auth) ============
 
 model OTP {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   phone      String
   code       String
-  attempts   Int      @default(0)
+  attempts   Int       @default(0)
   expiresAt  DateTime
-  createdAt  DateTime @default(now())
+  createdAt  DateTime  @default(now())
   usedAt     DateTime?
 
   @@index([phone])
@@ -348,14 +325,14 @@ model OTP {
 // ============ IMPORT LOG ============
 
 model ImportLog {
-  id           String   @id @default(cuid())
+  id           String    @id @default(cuid())
   filename     String
   rowCount     Int
   importedCount Int
   errorCount   Int
-  errors       Json?
-  status       String   // pending, processing, completed, failed
+  errors       String?
+  status       String    // pending, processing, completed, failed
   createdBy    String
-  createdAt    DateTime @default(now())
+  createdAt    DateTime  @default(now())
   completedAt  DateTime?
 }

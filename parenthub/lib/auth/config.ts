@@ -155,7 +155,7 @@ export const {
         await prisma.analyticsEvent.create({
           data: {
             event: "auth_signin",
-            properties: { userId: user.id },
+            properties: JSON.stringify({ userId: user.id }),
             sessionId: `auth_${Date.now()}`,
             userId: user.id,
             timestamp: new Date(),
@@ -174,7 +174,7 @@ export const {
           await prisma.analyticsEvent.create({
             data: {
               event: "auth_signout",
-              properties: { userId },
+              properties: JSON.stringify({ userId }),
               sessionId: `auth_${Date.now()}`,
               userId,
               timestamp: new Date(),

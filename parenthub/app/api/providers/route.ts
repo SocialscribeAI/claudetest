@@ -55,19 +55,23 @@ export async function GET(request: NextRequest) {
       deletedAt: null,
     };
 
-    // Category filter
+    // Category filter (using junction table for SQLite)
     if (category) {
       where.categories = {
-        some: { slug: category },
+        some: {
+          category: {
+            slug: category,
+          },
+        },
       };
     }
 
-    // Search query
+    // Search query (SQLite doesn't support mode: "insensitive")
     if (query) {
       where.OR = [
-        { name: { contains: query, mode: "insensitive" } },
-        { description: { contains: query, mode: "insensitive" } },
-        { services: { has: query } },
+        { name: { contains: query } },
+        { description: { contains: query } },
+        { city: { contains: query } },
       ];
     }
 
@@ -116,12 +120,16 @@ export async function GET(request: NextRequest) {
         take: limit * 2, // Fetch extra for geo filtering
         include: {
           categories: {
-            select: {
-              id: true,
-              name: true,
-              nameHe: true,
-              slug: true,
-              icon: true,
+            include: {
+              category: {
+                select: {
+                  id: true,
+                  name: true,
+                  nameHe: true,
+                  slug: true,
+                  icon: true,
+                },
+              },
             },
           },
           reviews: {
@@ -138,9 +146,8 @@ export async function GET(request: NextRequest) {
     let results = providers.map((provider: any) => {
       // Calculate average rating
       const ratings = provider.reviews.map((r: { rating: number }) => r.rating);
-      const avgRating = ratings.length > 0
-        ? ratings.reduce((a: number, b: number) => a + b, 0) / ratings.length
-        : null;
+      const avgRating =
+        ratings.length > 0 ? ratings.reduce((a: number, b: number) => a + b, 0) / ratings.length : null;
 
       // Calculate distance if user location provided
       let distance: number | null = null;
@@ -148,14 +155,21 @@ export async function GET(request: NextRequest) {
         distance = calculateDistance(lat, lng, provider.lat, provider.lng);
       }
 
+      // Parse JSON strings (SQLite stores arrays as JSON strings)
+      const photos = typeof provider.photos === "string" ? JSON.parse(provider.photos) : provider.photos || [];
+      const services = typeof provider.services === "string" ? JSON.parse(provider.services) : provider.services || [];
+
+      // Map categories from junction table
+      const categories = provider.categories.map((cp: any) => cp.category);
+
       return {
         id: provider.id,
         name: provider.name,
         slug: provider.slug,
-        photo: provider.photos[0] || null,
-        photos: provider.photos,
+        photo: photos[0] || null,
+        photos,
         description: provider.description.substring(0, 200),
-        categories: provider.categories,
+        categories,
         rating: avgRating ? Math.round(avgRating * 10) / 10 : null,
         reviewCount: provider.reviews.length,
         priceBand: provider.priceBand === "BUDGET" ? 1 : provider.priceBand === "MIDRANGE" ? 2 : 3,
@@ -169,6 +183,7 @@ export async function GET(request: NextRequest) {
         isVerified: provider.isVerified,
         phone: provider.phone,
         whatsapp: provider.whatsapp,
+        services,
       };
     });
 
@@ -199,9 +214,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error("Error fetching providers:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch providers" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to fetch providers" }, { status: 500 });
   }
 }
