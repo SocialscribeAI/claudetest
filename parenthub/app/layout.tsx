@@ -14,6 +14,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import QueryProvider from "@/components/providers/QueryProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -72,8 +73,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-gray-50`}
       >
-        {/* TODO: Add providers (QueryClientProvider, SessionProvider, LocationProvider) */}
-        {children}
+        <QueryProvider>{children}</QueryProvider>
       </body>
     </html>
   );

@@ -18,3 +18,4 @@
 export * from "./use-location";
 export * from "./use-analytics";
 export * from "./use-favorites";
+export * from "./use-api";
