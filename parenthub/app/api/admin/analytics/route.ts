@@ -148,17 +148,17 @@ export async function GET(request: NextRequest) {
       signupsByDay.set(date, 0);
     });
 
-    searchEvents.forEach((e) => {
+    searchEvents.forEach((e: { timestamp: Date }) => {
       const date = formatDate(e.timestamp);
       searchesByDay.set(date, (searchesByDay.get(date) || 0) + 1);
     });
 
-    leadEvents.forEach((e) => {
+    leadEvents.forEach((e: { timestamp: Date }) => {
       const date = formatDate(e.timestamp);
       leadsByDay.set(date, (leadsByDay.get(date) || 0) + 1);
     });
 
-    signupEvents.forEach((e) => {
+    signupEvents.forEach((e: { createdAt: Date }) => {
       const date = formatDate(e.createdAt);
       signupsByDay.set(date, (signupsByDay.get(date) || 0) + 1);
     });
@@ -177,19 +177,21 @@ export async function GET(request: NextRequest) {
     });
 
     // Get provider details
+    type GroupByResult = { providerId: string | null; _count: { id: number } };
     const topProviderIds = topByViews
-      .filter((p) => p.providerId)
-      .map((p) => p.providerId as string);
+      .filter((p: GroupByResult) => p.providerId)
+      .map((p: GroupByResult) => p.providerId as string);
 
     const topProviders = await prisma.provider.findMany({
       where: { id: { in: topProviderIds } },
       select: { id: true, name: true, city: true },
     });
 
-    const topProvidersWithViews = topByViews.map((p) => ({
-      provider: topProviders.find((tp) => tp.id === p.providerId),
+    type ProviderInfo = { id: string; name: string; city: string };
+    const topProvidersWithViews = topByViews.map((p: GroupByResult) => ({
+      provider: topProviders.find((tp: ProviderInfo) => tp.id === p.providerId),
       views: p._count.id,
-    })).filter((p) => p.provider);
+    })).filter((p: { provider: ProviderInfo | undefined; views: number }) => p.provider);
 
     // Get coverage by city
     const coverageByCity = await prisma.provider.groupBy({
@@ -211,12 +213,19 @@ export async function GET(request: NextRequest) {
       orderBy: { sortOrder: "asc" },
     });
 
-    const coverageByCategory = categories.map((cat) => ({
+    type CategoryWithCount = {
+      id: string;
+      name: string;
+      nameHe: string | null;
+      _count: { providers: number };
+    };
+    type CategoryResult = { id: string; name: string; nameHe: string | null; count: number };
+    const coverageByCategory = categories.map((cat: CategoryWithCount): CategoryResult => ({
       id: cat.id,
       name: cat.name,
       nameHe: cat.nameHe,
       count: cat._count.providers,
-    })).sort((a, b) => b.count - a.count);
+    })).sort((a: CategoryResult, b: CategoryResult) => b.count - a.count);
 
     return NextResponse.json({
       overview: {
@@ -244,7 +253,7 @@ export async function GET(request: NextRequest) {
         })),
       },
       topProviders: topProvidersWithViews,
-      coverageByCity: coverageByCity.map((c) => ({
+      coverageByCity: coverageByCity.map((c: { city: string; _count: { id: number } }) => ({
         city: c.city,
         count: c._count.id,
       })),

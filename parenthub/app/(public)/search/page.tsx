@@ -379,7 +379,7 @@ function SearchContent() {
       <FilterSheet
         isOpen={isFilterOpen}
         onClose={() => setIsFilterOpen(false)}
-        initialFilters={filters}
+        filters={filters}
         onApply={handleFilterApply}
       />
     </>

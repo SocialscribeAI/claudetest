@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth/config";
 import { prisma } from "@/lib/db";
 import { z } from "zod";
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import type { Prisma } from "@prisma/client";
 
 // Helper to check admin role
@@ -81,7 +82,7 @@ export async function GET(request: NextRequest) {
     const limit = Math.min(parseInt(searchParams.get("limit") || "20"), 100);
 
     // Build where clause
-    const where: Prisma.ProviderWhereInput = {
+    const where: Record<string, unknown> = {
       deletedAt: null,
     };
 
@@ -108,7 +109,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Build orderBy
-    let orderBy: Prisma.ProviderOrderByWithRelationInput = {};
+    let orderBy: Record<string, "asc" | "desc"> = {};
     switch (sort) {
       case "name":
         orderBy = { name: order as "asc" | "desc" };

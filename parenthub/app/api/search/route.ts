@@ -19,7 +19,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { calculateDistance } from "@/lib/maps/google-maps";
+import { calculateDistance } from "@/lib/geo";
 
 export async function GET(request: NextRequest) {
   try {

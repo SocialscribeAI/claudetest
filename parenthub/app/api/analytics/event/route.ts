@@ -45,7 +45,7 @@ const validEvents = [
 // Validation schema
 const eventSchema = z.object({
   event: z.enum(validEvents),
-  properties: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
+  properties: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
   sessionId: z.string().min(1),
   timestamp: z.string().datetime().optional(),
   providerId: z.string().optional(),

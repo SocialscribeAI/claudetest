@@ -60,7 +60,7 @@ const updateProviderSchema = z.object({
   services: z.array(z.string()).optional(),
   priceBand: z.enum(["BUDGET", "MIDRANGE", "PREMIUM"]).optional(),
   languages: z.array(z.string()).optional(),
-  schedule: z.record(z.any()).optional().nullable(),
+  schedule: z.record(z.string(), z.any()).optional().nullable(),
   isAvailable: z.boolean().optional(),
   contact: z.object({
     phone: z.string().optional(),

@@ -57,7 +57,7 @@ const updateProviderSchema = z.object({
   priceBand: z.enum(["BUDGET", "MIDRANGE", "PREMIUM"]).optional(),
   languages: z.array(z.string()).optional(),
   photos: z.array(z.string().url()).optional(),
-  schedule: z.record(z.any()).optional().nullable(),
+  schedule: z.record(z.string(), z.any()).optional().nullable(),
   isAvailable: z.boolean().optional(),
   status: z.enum(["PENDING", "ACTIVE", "SUSPENDED"]).optional(),
   isVerified: z.boolean().optional(),

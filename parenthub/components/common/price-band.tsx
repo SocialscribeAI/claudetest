@@ -15,7 +15,7 @@ interface PriceBandProps {
   mode?: "display" | "input";
   onChange?: (band: PriceBandType) => void;
   showLabel?: boolean;
-  size?: "sm" | "md";
+  size?: "sm" | "md" | "lg";
 }
 
 const labels: Record<number, string> = {
@@ -57,6 +57,7 @@ export function PriceBand({
   const sizeClasses = {
     sm: "text-xs",
     md: "text-sm",
+    lg: "text-base",
   };
 
   return (

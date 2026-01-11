@@ -7,17 +7,11 @@
  * - Public navigation header
  * - Bottom navigation bar (mobile)
  * - Footer with links
- * - Location context provider
- * - Analytics page view tracking
- *
- * Components used:
- * - PublicHeader
- * - BottomNav
- * - Footer
- *
- * Contexts provided:
- * - LocationContext (user's current location)
  */
+
+import { PublicHeader } from "@/components/layout/PublicHeader";
+import { BottomNav } from "@/components/layout/BottomNav";
+import { Footer } from "@/components/layout/Footer";
 
 export default function PublicLayout({
   children,
@@ -26,10 +20,10 @@ export default function PublicLayout({
 }) {
   return (
     <div className="min-h-screen flex flex-col">
-      {/* TODO: Add PublicHeader */}
-      <main className="flex-1">{children}</main>
-      {/* TODO: Add BottomNav */}
-      {/* TODO: Add Footer */}
+      <PublicHeader />
+      <main className="flex-1 pb-20 md:pb-0">{children}</main>
+      <BottomNav />
+      <Footer />
     </div>
   );
 }

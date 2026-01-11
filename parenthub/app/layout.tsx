@@ -4,27 +4,15 @@
  * Purpose: Root layout for the entire application
  *
  * Features:
- * - Global font setup (Hebrew + English)
+ * - System font setup
  * - RTL support
  * - Metadata for SEO
  * - Global providers (Query, Auth, Location)
- * - Analytics initialization
  */
 
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import QueryProvider from "@/components/providers/QueryProvider";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: {
@@ -70,9 +58,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="he" dir="rtl">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-gray-50`}
-      >
+      <body className="antialiased min-h-screen bg-gray-50 font-sans">
         <QueryProvider>{children}</QueryProvider>
       </body>
     </html>
